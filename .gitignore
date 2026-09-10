@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Model weights (downloaded by the notebooks)
+models/*.task
+
+# Selfies / personal images (see data/README.md)
+data/*.jpg
+data/*.jpeg
+data/*.png
+
+# Generated evaluation outputs (face-image copies, tables)
+outputs/
