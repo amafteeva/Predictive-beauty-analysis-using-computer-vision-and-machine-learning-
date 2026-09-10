@@ -125,6 +125,56 @@ def summarize_group_completion(evaluation: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values("group").reset_index(drop=True)
 
 
+def evaluate_group_completion_disparity(
+    evaluation: pd.DataFrame,
+    *,
+    number_of_permutations: int = 10_000,
+    random_state: int = RANDOM_STATE,
+) -> dict[str, float]:
+    """Test whether the completion-rate spread across groups exceeds chance.
+
+    summarize_group_completion shows the observed spread in completion rate
+    across FairFace groups (e.g. 80% vs. 90%), but with only ~20 images per
+    group that spread could easily be noise rather than a real disparity.
+    This permutation test shuffles the `group` labels many times under the
+    null hypothesis that pipeline success is independent of group, and
+    measures how often a random shuffle produces a completion-rate spread
+    (max group rate - min group rate) at least as large as the one actually
+    observed. A low p-value means the observed spread is unlikely to be
+    chance; a high p-value means it's consistent with random noise at this
+    sample size.
+    """
+
+    if number_of_permutations < 1:
+        raise ValueError("number_of_permutations must be at least 1.")
+
+    rng = np.random.default_rng(random_state)
+    group_codes, group_names = pd.factorize(evaluation["group"])
+    success = evaluation["pipeline_success"].to_numpy(dtype=float)
+    number_of_groups = len(group_names)
+
+    def rate_spread(codes: np.ndarray) -> float:
+        totals = np.bincount(codes, minlength=number_of_groups)
+        successes = np.bincount(codes, weights=success, minlength=number_of_groups)
+        rates = successes / totals
+        return float(rates.max() - rates.min())
+
+    observed_spread = rate_spread(group_codes)
+
+    shuffled = group_codes.copy()
+    permuted_spreads = np.empty(number_of_permutations)
+    for index in range(number_of_permutations):
+        rng.shuffle(shuffled)
+        permuted_spreads[index] = rate_spread(shuffled)
+
+    p_value = float(np.mean(permuted_spreads >= observed_spread))
+    return {
+        "observed_completion_rate_spread": observed_spread,
+        "permutation_p_value": p_value,
+        "number_of_permutations": float(number_of_permutations),
+    }
+
+
 def simulate_colour_robustness(
     products: pd.DataFrame,
     *,
