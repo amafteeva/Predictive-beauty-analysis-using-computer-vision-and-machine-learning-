@@ -35,6 +35,63 @@ def plot_catalog_lab(products: pd.DataFrame):
     return figure, axis
 
 
+def plot_brand_coverage(products: pd.DataFrame, *, thin_brand_threshold: int = 5):
+    """Show shade count per brand, flagging brands too thin for a real match.
+
+    A brand with only a handful of shades can dominate a top-N recommendation
+    list without actually offering good coverage across skin tones.
+    """
+
+    counts = products.groupby("brand").size().sort_values()
+    colours = [
+        "#D62728" if count < thin_brand_threshold else "#1F77B4" for count in counts
+    ]
+
+    figure, axis = plt.subplots(figsize=(8, max(4, 0.28 * len(counts))))
+    axis.barh(counts.index, counts.to_numpy(), color=colours)
+    axis.set(
+        title=f"Shades per Brand (red = fewer than {thin_brand_threshold})",
+        xlabel="Number of shades",
+    )
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
+def plot_lab_distributions(products: pd.DataFrame):
+    """Show the marginal distribution of each CIELAB channel in the catalogue."""
+
+    channels = [("lab_L", "L: Lightness"), ("lab_a", "a: Green-Red"), ("lab_b", "b: Blue-Yellow")]
+    figure, axes = plt.subplots(1, 3, figsize=(13, 4))
+    for axis, (column, title) in zip(axes, channels, strict=True):
+        axis.hist(products[column], bins=30, color="#1F77B4", edgecolor="white")
+        axis.set(title=title, xlabel=column)
+        axis.grid(False)
+    figure.tight_layout()
+    return figure, axes
+
+
+def plot_price_distribution(products: pd.DataFrame):
+    """Show the distribution of estimated prices, noting how much is missing."""
+
+    if "price" not in products.columns:
+        raise ValueError("products has no 'price' column; run attach_price_estimates first.")
+
+    priced = products["price"].dropna()
+    coverage = len(priced) / len(products)
+
+    figure, axis = plt.subplots(figsize=(8, 4))
+    axis.hist(priced, bins=30, color="#2CA02C", edgecolor="white")
+    axis.set(
+        title=f"Estimated Price Distribution ({coverage:.0%} of rows have a price)",
+        xlabel="Price (USD)",
+        ylabel="Shades",
+    )
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
 def plot_skin_preview(skin_tone):
     """Show selected facial regions beside the extracted median colour."""
 
@@ -51,6 +108,31 @@ def plot_skin_preview(skin_tone):
     return figure, axes
 
 
+def plot_skin_previews(skin_tones, labels: list[str] | None = None):
+    """Show selected regions and detected colour for several images, one row each."""
+
+    if not skin_tones:
+        raise ValueError("skin_tones must contain at least one SkinTone.")
+    if labels is None:
+        labels = [f"Image {index + 1}" for index in range(len(skin_tones))]
+    elif len(labels) != len(skin_tones):
+        raise ValueError("labels must have the same length as skin_tones.")
+
+    figure, axes = plt.subplots(len(skin_tones), 2, figsize=(10, 5 * len(skin_tones)))
+    axes = np.atleast_2d(axes)
+    for row, (skin_tone, label) in enumerate(zip(skin_tones, labels, strict=True)):
+        axes[row, 0].imshow(skin_tone.preview_rgb)
+        axes[row, 0].set_title(f"{label}: selected regions")
+        axes[row, 0].axis("off")
+
+        swatch = np.full((200, 200, 3), skin_tone.rgb, dtype=np.uint8)
+        axes[row, 1].imshow(swatch)
+        axes[row, 1].set_title(f"{label}: RGB {skin_tone.rgb.tolist()}")
+        axes[row, 1].axis("off")
+    figure.tight_layout()
+    return figure, axes
+
+
 def plot_match_swatches(
     skin_rgb: np.ndarray,
     recommendations: pd.DataFrame,
@@ -58,10 +140,19 @@ def plot_match_swatches(
     """Display the detected skin colour beside recommended product colours."""
 
     colours = [rgb_to_hex(skin_rgb)] + [f"#{value}" for value in recommendations["hex"]]
-    labels = ["Detected skin"] + [
-        f"{row.brand}\n{row.product}\nDelta E {row.color_distance:.2f}"
-        for row in recommendations.itertuples()
-    ]
+    has_price = "price" in recommendations.columns
+
+    def _label(row) -> str:
+        price_line = ""
+        if has_price:
+            price_line = (
+                "\nUnknown price"
+                if pd.isna(row.price)
+                else f"\n${row.price:.0f}"
+            )
+        return f"{row.brand}\n{row.product}{price_line}\nDelta E {row.color_distance:.2f}"
+
+    labels = ["Detected skin"] + [_label(row) for row in recommendations.itertuples()]
     figure, axes = plt.subplots(1, len(colours), figsize=(3 * len(colours), 3))
     axes = np.atleast_1d(axes)
     for axis, colour, label in zip(axes, colours, labels, strict=True):
@@ -96,6 +187,64 @@ def plot_cluster_metrics(cluster_evaluation: pd.DataFrame):
         xlabel="Clusters",
         ylabel="Score",
     )
+    for axis in axes:
+        axis.grid(False)
+    figure.tight_layout()
+    return figure, axes
+
+
+def plot_cluster_recommendation_impact(impact_evaluation: pd.DataFrame):
+    """Plot the downstream recommendation cost of cluster-restricted ranking.
+
+    Unlike plot_cluster_metrics (cluster geometry only), this shows how often
+    and how much restricting to a predicted cluster changes or worsens the
+    top-1 match a user would actually see, from
+    evaluate_cluster_recommendation_impact.
+    """
+
+    figure, axes = plt.subplots(1, 2, figsize=(12, 4))
+    axes[0].plot(
+        impact_evaluation["clusters"],
+        impact_evaluation["mean_delta_e_loss"],
+        marker="o",
+        color="#D62728",
+        label="Mean Delta E loss",
+    )
+    axes[0].plot(
+        impact_evaluation["clusters"],
+        impact_evaluation["max_delta_e_loss"],
+        marker="o",
+        linestyle="--",
+        color="#D62728",
+        alpha=0.4,
+        label="Max Delta E loss",
+    )
+    axes[0].set(
+        title="Cluster-Restriction Colour Cost",
+        xlabel="Clusters",
+        ylabel="Delta E lost vs. unrestricted top-1",
+    )
+    axes[0].legend(fontsize=8)
+    axes[1].plot(
+        impact_evaluation["clusters"],
+        impact_evaluation["top1_mismatch_rate"] * 100,
+        marker="o",
+        color="#1F77B4",
+        label="Top-1 changed",
+    )
+    axes[1].plot(
+        impact_evaluation["clusters"],
+        impact_evaluation["perceptible_loss_rate"] * 100,
+        marker="o",
+        color="orange",
+        label="Perceptibly worse",
+    )
+    axes[1].set(
+        title="Cluster-Restriction Impact Rate",
+        xlabel="Clusters",
+        ylabel="% of simulated queries",
+    )
+    axes[1].legend(fontsize=8)
     for axis in axes:
         axis.grid(False)
     figure.tight_layout()
