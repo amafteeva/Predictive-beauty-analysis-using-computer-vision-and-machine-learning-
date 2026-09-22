@@ -52,6 +52,39 @@ def test_attach_price_estimates_matches_exact_and_prefix_brands():
     assert np.isnan(result.loc[result["brand"] == "Obscure Brand", "price"].iloc[0])
 
 
+def test_attach_price_estimates_prefers_foundation_category_price():
+    products = pd.DataFrame({"brand": ["Alpha"]})
+    reference = pd.DataFrame(
+        {
+            "brand": ["Alpha", "Alpha", "Alpha"],
+            "category": ["Blush", "Blush", "Foundation"],
+            "price": [5.0, 7.0, 40.0],
+        }
+    )
+
+    result = attach_price_estimates(products, reference)
+
+    # The brand's all-category median (6.0, from the two Blush rows) would
+    # be a poor stand-in for its one real Foundation price (40.0).
+    assert result.loc[0, "price"] == 40.0
+
+
+def test_attach_price_estimates_falls_back_to_all_categories_when_brand_lacks_target():
+    products = pd.DataFrame({"brand": ["Beta"]})
+    reference = pd.DataFrame(
+        {
+            "brand": ["Beta", "Beta"],
+            "category": ["Blush", "Bronzer"],
+            "price": [10.0, 20.0],
+        }
+    )
+
+    result = attach_price_estimates(products, reference)
+
+    # No Foundation rows for this brand at all -> fall back rather than NaN.
+    assert result.loc[0, "price"] == 15.0
+
+
 def test_attach_price_estimates_ignores_reference_rows_missing_price():
     products = pd.DataFrame({"brand": ["Maybelline"]})
     reference = pd.DataFrame(

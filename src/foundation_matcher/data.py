@@ -66,6 +66,8 @@ def attach_price_estimates(
     brand_column: str = "brand",
     reference_brand_column: str = "brand",
     reference_price_column: str = "price",
+    reference_category_column: str | None = "category",
+    target_category: str | None = "Foundation",
 ) -> pd.DataFrame:
     """Attach a brand-level median price estimate from an external product export.
 
@@ -78,29 +80,56 @@ def attach_price_estimates(
     niche or international brands in the catalogue get price = NaN rather
     than a guessed value — check for that explicitly rather than assuming
     every row has a price.
+
+    When ``reference_category_column``/``target_category`` are given and
+    present, the median is computed from that brand's matching-category rows
+    first (e.g. only its Foundation products) rather than every product it
+    sells: a brand's primers, blushes, etc. are often priced quite
+    differently (on Luxxify, the median absolute difference between a
+    brand's all-category and Foundation-only price is ~16%, and >100% for
+    some brands). A brand with no rows in the target category falls back to
+    its all-category median instead of losing price coverage entirely.
     """
 
-    reference = price_reference[[reference_brand_column, reference_price_column]].dropna(
+    def brand_median_price(reference_subset: pd.DataFrame) -> pd.Series:
+        normalized_brand = reference_subset[reference_brand_column].map(normalize_brand_name)
+        return reference_subset[reference_price_column].groupby(normalized_brand).median()
+
+    reference = price_reference.dropna(
         subset=[reference_brand_column, reference_price_column]
     )
-    normalized_reference = reference[reference_brand_column].map(normalize_brand_name)
-    brand_price = (
-        reference[reference_price_column].groupby(normalized_reference).median()
-    )
-    reference_brands = brand_price.index.tolist()
 
-    def match_price(normalized_brand: str) -> float:
+    use_category = (
+        reference_category_column is not None
+        and target_category is not None
+        and reference_category_column in reference.columns
+    )
+
+    fallback_price = brand_median_price(reference)
+    target_price = (
+        brand_median_price(reference[reference[reference_category_column] == target_category])
+        if use_category
+        else fallback_price
+    )
+
+    def match_price(normalized_brand: str, brand_price: pd.Series) -> float | None:
         if normalized_brand in brand_price.index:
             return brand_price.loc[normalized_brand]
-        for candidate in reference_brands:
+        for candidate in brand_price.index:
             if candidate.startswith(normalized_brand + " ") or normalized_brand.startswith(
                 candidate + " "
             ):
                 return brand_price.loc[candidate]
-        return np.nan
+        return None
+
+    def resolve_price(normalized_brand: str) -> float:
+        price = match_price(normalized_brand, target_price)
+        if price is None:
+            price = match_price(normalized_brand, fallback_price)
+        return np.nan if price is None else price
 
     catalog_brands = products[brand_column].map(normalize_brand_name)
-    price_lookup = {brand: match_price(brand) for brand in catalog_brands.unique()}
+    price_lookup = {brand: resolve_price(brand) for brand in catalog_brands.unique()}
 
     result = products.copy()
     result["price"] = catalog_brands.map(price_lookup)
