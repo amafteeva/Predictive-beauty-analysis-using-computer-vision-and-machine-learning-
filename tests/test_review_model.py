@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -6,6 +7,8 @@ from foundation_matcher.review_model import (
     build_review_classifier,
     grouped_train_test_split,
     prepare_review_data,
+    summarize_luxxify_products,
+    summarize_luxxify_reviews,
 )
 
 
@@ -112,3 +115,43 @@ def test_build_review_classifier_fits_and_predicts_with_product_metadata():
     predictions = model.predict(features)
 
     assert len(predictions) == len(features)
+
+
+def test_summarize_luxxify_products_reports_missingness_and_price():
+    raw_products = pd.DataFrame(
+        {
+            "category": ["Foundation", "Foundation", None, "Blush"],
+            "brand": ["Alpha", None, "Gamma", "Delta"],
+            "price": [20.0, 45.0, 30.0, 15.0],
+            "num_shades": [np.nan, np.nan, np.nan, 12.0],
+        }
+    )
+
+    summary = summarize_luxxify_products(raw_products)
+
+    assert summary["total_products"] == 4
+    assert summary["total_categories"] == 2
+    assert summary["category_missing_rate"] == 0.25
+    assert summary["brand_missing_rate"] == 0.25
+    assert summary["price_missing_rate"] == 0.0
+    assert summary["num_shades_missing_rate"] == 0.75
+    assert summary["price_median"] == 25.0
+
+
+def test_summarize_luxxify_reviews_reports_text_coverage_and_spread():
+    raw_reviews = pd.DataFrame(
+        {
+            "comments": ["one two three", None, "four five six seven", None, "eight"],
+            "product_link_id": [1, 1, 2, 2, 2],
+            "is_verified_buyer": ["t", "f", "f", "f", "t"],
+        }
+    )
+
+    summary = summarize_luxxify_reviews(raw_reviews)
+
+    assert summary["total_reviews"] == 5
+    assert summary["reviews_with_text"] == 3
+    assert summary["text_missing_rate"] == 0.4
+    assert summary["verified_buyer_rate"] == 0.4
+    assert summary["median_reviews_per_product"] == 2.5
+    assert summary["max_reviews_per_product"] == 3
