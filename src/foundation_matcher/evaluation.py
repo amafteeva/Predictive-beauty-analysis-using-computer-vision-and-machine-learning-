@@ -41,6 +41,43 @@ def select_balanced_adult_samples(
     return selected
 
 
+def summarize_fairface_labels(
+    samples: Sequence[dict],
+    *,
+    race_names: Sequence[str],
+    age_names: Sequence[str],
+    gender_names: Sequence[str],
+) -> dict[str, pd.DataFrame]:
+    """Summarize the label distribution of a raw (unbalanced) FairFace sample.
+
+    select_balanced_adult_samples forces an equal count per race group; this
+    shows what the underlying stream looks like before that correction, so
+    the reason for balancing is visible rather than assumed. Categories are
+    returned in their natural order (age bins, in particular, are not
+    alphabetical), including any with zero occurrences in this sample.
+    """
+
+    frame = pd.DataFrame(
+        {
+            "race": [race_names[int(sample["race"])] for sample in samples],
+            "age": [age_names[int(sample["age"])] for sample in samples],
+            "gender": [gender_names[int(sample["gender"])] for sample in samples],
+        }
+    )
+
+    def distribution(column: str, names: Sequence[str]) -> pd.DataFrame:
+        counts = frame[column].value_counts().reindex(names, fill_value=0)
+        table = counts.rename_axis(column).reset_index(name="count")
+        table["proportion"] = (table["count"] / table["count"].sum()).round(3)
+        return table
+
+    return {
+        "race": distribution("race", race_names),
+        "age": distribution("age", age_names),
+        "gender": distribution("gender", gender_names),
+    }
+
+
 def evaluate_face_pipeline(
     samples: Sequence[dict],
     group_names: Sequence[str],

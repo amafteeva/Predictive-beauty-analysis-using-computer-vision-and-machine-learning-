@@ -26,6 +26,50 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from foundation_matcher.config import RANDOM_STATE
 
 
+def summarize_luxxify_products(products: pd.DataFrame) -> dict[str, float]:
+    """Summarize the raw Luxxify product export before any cleaning.
+
+    Surfaces column-level coverage that attach_product_metadata doesn't
+    need to know about, but that matters for judging how reliable this
+    export is as a source of product context: e.g. num_shades is missing
+    for the vast majority of rows, and brand for roughly a third.
+    """
+
+    return {
+        "total_products": float(len(products)),
+        "total_categories": float(products["category"].nunique()),
+        "category_missing_rate": round(float(products["category"].isna().mean()), 3),
+        "brand_missing_rate": round(float(products["brand"].isna().mean()), 3),
+        "price_missing_rate": round(float(products["price"].isna().mean()), 3),
+        "num_shades_missing_rate": round(float(products["num_shades"].isna().mean()), 3),
+        "price_median": round(float(products["price"].median()), 2),
+    }
+
+
+def summarize_luxxify_reviews(reviews: pd.DataFrame) -> dict[str, float]:
+    """Summarize the raw Luxxify review export before any cleaning.
+
+    prepare_review_data silently drops every row with no review text; this
+    shows how much of the raw export that actually is, and how unevenly
+    review volume is spread across products.
+    """
+
+    text_missing_rate = float(reviews["comments"].isna().mean())
+    lengths = reviews["comments"].dropna().str.split().str.len()
+    reviews_per_product = reviews.groupby("product_link_id").size()
+    verified_rate = float((reviews["is_verified_buyer"] == "t").mean())
+
+    return {
+        "total_reviews": float(len(reviews)),
+        "reviews_with_text": float(reviews["comments"].notna().sum()),
+        "text_missing_rate": round(text_missing_rate, 3),
+        "median_review_word_count": float(lengths.median()),
+        "verified_buyer_rate": round(verified_rate, 3),
+        "median_reviews_per_product": float(reviews_per_product.median()),
+        "max_reviews_per_product": float(reviews_per_product.max()),
+    }
+
+
 def prepare_review_data(
     reviews: pd.DataFrame,
     *,

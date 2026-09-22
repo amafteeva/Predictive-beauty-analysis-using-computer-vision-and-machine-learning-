@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from foundation_matcher.evaluation import evaluate_group_completion_disparity
+from foundation_matcher.evaluation import (
+    evaluate_group_completion_disparity,
+    summarize_fairface_labels,
+)
 
 
 def _evaluation_frame(group_a_successes: int, group_b_successes: int, per_group: int = 20):
@@ -44,3 +47,22 @@ def test_rejects_invalid_permutation_count():
     evaluation = _evaluation_frame(group_a_successes=18, group_b_successes=16)
     with pytest.raises(ValueError, match="number_of_permutations"):
         evaluate_group_completion_disparity(evaluation, number_of_permutations=0)
+
+
+def test_summarize_fairface_labels_preserves_natural_order_and_zero_fills():
+    race_names = ["East Asian", "Black"]
+    age_names = ["young", "old", "very old"]
+    gender_names = ["Male", "Female"]
+
+    result = summarize_fairface_labels(
+        [{"race": 0, "age": 0, "gender": 0}, {"race": 1, "age": 2, "gender": 1}],
+        race_names=race_names,
+        age_names=age_names,
+        gender_names=gender_names,
+    )
+
+    assert list(result["race"]["race"]) == ["East Asian", "Black"]
+    assert list(result["age"]["age"]) == ["young", "old", "very old"]
+    # "old" (index 1) has zero occurrences but must still appear, at 0.
+    assert result["age"].set_index("age").loc["old", "count"] == 0
+    assert result["race"]["proportion"].sum() == 1.0

@@ -33,3 +33,17 @@ FAIRFACE_RACE_NAMES = [
     "Latino/Hispanic",
     "Southeast Asian",
 ]
+
+FAIRFACE_AGE_NAMES = [
+    "0-2",
+    "3-9",
+    "10-19",
+    "20-29",
+    "30-39",
+    "40-49",
+    "50-59",
+    "60-69",
+    "more than 70",
+]
+
+FAIRFACE_GENDER_NAMES = ["Male", "Female"]

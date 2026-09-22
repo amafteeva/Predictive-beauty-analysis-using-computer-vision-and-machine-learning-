@@ -71,8 +71,19 @@ def plot_lab_distributions(products: pd.DataFrame):
     return figure, axes
 
 
-def plot_price_distribution(products: pd.DataFrame):
-    """Show the distribution of estimated prices, noting how much is missing."""
+def plot_price_distribution(
+    products: pd.DataFrame,
+    *,
+    row_label: str = "Shades",
+    title: str = "Estimated Price Distribution",
+):
+    """Show the distribution of prices, noting how much of the data has one.
+
+    Reusable for both the foundation catalogue (after attach_price_estimates,
+    where every price genuinely is an estimate) and a raw product export
+    with its own real listed prices — pass row_label/title to match
+    whichever it is.
+    """
 
     if "price" not in products.columns:
         raise ValueError("products has no 'price' column; run attach_price_estimates first.")
@@ -83,10 +94,58 @@ def plot_price_distribution(products: pd.DataFrame):
     figure, axis = plt.subplots(figsize=(8, 4))
     axis.hist(priced, bins=30, color="#2CA02C", edgecolor="white")
     axis.set(
-        title=f"Estimated Price Distribution ({coverage:.0%} of rows have a price)",
+        title=f"{title} ({coverage:.0%} of rows have a price)",
         xlabel="Price (USD)",
-        ylabel="Shades",
+        ylabel=row_label,
     )
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
+def plot_rating_distribution(reviews: pd.DataFrame, *, rating_column: str = "rating"):
+    """Show the raw star-rating distribution before any positive/negative split."""
+
+    counts = reviews[rating_column].value_counts().sort_index()
+    figure, axis = plt.subplots(figsize=(6, 4))
+    axis.bar(counts.index.astype(str), counts.to_numpy(), color="#1F77B4")
+    axis.set(title="Review Rating Distribution", xlabel="Stars", ylabel="Reviews")
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
+def plot_review_length_distribution(reviews: pd.DataFrame, *, text_column: str = "comments"):
+    """Show how long (in words) the reviews that have text actually are."""
+
+    lengths = reviews[text_column].dropna().str.split().str.len()
+    figure, axis = plt.subplots(figsize=(8, 4))
+    axis.hist(
+        lengths,
+        bins=40,
+        range=(0, lengths.quantile(0.99)),
+        color="#9467BD",
+        edgecolor="white",
+    )
+    axis.set(
+        title="Review Length Distribution (word count)",
+        xlabel="Words",
+        ylabel="Reviews",
+    )
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
+def plot_category_distribution(
+    products: pd.DataFrame, *, category_column: str = "category", top_n: int = 12
+):
+    """Show the most common product categories in a product export."""
+
+    counts = products[category_column].value_counts().head(top_n).sort_values()
+    figure, axis = plt.subplots(figsize=(8, max(4, 0.35 * len(counts))))
+    axis.barh(counts.index.astype(str), counts.to_numpy(), color="#FF7F0E")
+    axis.set(title=f"Top {top_n} Product Categories", xlabel="Products")
     axis.grid(False)
     figure.tight_layout()
     return figure, axis
@@ -276,6 +335,24 @@ def plot_shade_clusters(products: pd.DataFrame):
     figure.colorbar(scatter, ax=axis, label="Shade cluster")
     figure.tight_layout()
     return figure, axis
+
+
+def plot_fairface_label_distribution(distributions: dict[str, pd.DataFrame]):
+    """Show race/age/gender counts in a raw (unbalanced) FairFace sample.
+
+    Expects the dict returned by summarize_fairface_labels, so categories
+    are already in their natural order (age bins are not alphabetical).
+    """
+
+    figure, axes = plt.subplots(1, 3, figsize=(16, 5))
+    for axis, key in zip(axes, ["race", "age", "gender"], strict=True):
+        table = distributions[key]
+        axis.bar(table[key].astype(str), table["count"], color="#1F77B4")
+        axis.set(title=f"{key.title()} Distribution", ylabel="Samples")
+        axis.tick_params(axis="x", rotation=60)
+        axis.grid(False)
+    figure.tight_layout()
+    return figure, axes
 
 
 def plot_group_completion(group_summary: pd.DataFrame):
