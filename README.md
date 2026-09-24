@@ -1,6 +1,6 @@
 # Predictive Beauty Analytics: Foundation Shade Recommendation
 An end-to-end data science, computer vision, and machine learning project that estimates skin tone from facial images and recommends foundation shades using perceptual color similarity.
-The project combines MediaPipe facial landmark detection, CIELAB color analysis, CIEDE2000 color distance, K-Means clustering, and model evaluation to build and assess a foundation shade recommendation pipeline.
+The project combines MediaPipe facial landmark detection, CIELAB color analysis, CIEDE2000 color distance, brute-force nearest-neighbor shade matching, and model evaluation to build and assess a foundation shade recommendation pipeline.
 ## Project Overview
 Choosing a foundation shade online is difficult because product shade names are inconsistent across brands and photographs can be affected by lighting, cameras, and skin-tone variation.
 This project explores a data-driven approach that:

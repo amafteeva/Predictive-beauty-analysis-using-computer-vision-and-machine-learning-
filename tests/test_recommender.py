@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from foundation_matcher.recommender import (
-    evaluate_cluster_recommendation_impact,
+    benchmark_brute_force_search,
     recommend_foundations,
 )
 
@@ -57,36 +57,20 @@ def _spread_out_catalog(n: int = 15) -> pd.DataFrame:
     )
 
 
-def test_cluster_recommendation_impact_is_zero_with_a_single_cluster():
-    result = evaluate_cluster_recommendation_impact(
+def test_benchmark_brute_force_search_reports_one_row_per_catalog_size():
+    result = benchmark_brute_force_search(
         _spread_out_catalog(),
-        cluster_counts=(1,),
-        number_of_queries=20,
+        catalog_sizes=(20, 50),
+        number_of_queries=5,
         random_state=1,
     )
-    row = result.iloc[0]
-    assert row["clusters"] == 1
-    assert row["top1_mismatch_rate"] == 0.0
-    assert row["mean_delta_e_loss"] == 0.0
-    assert row["max_delta_e_loss"] == 0.0
+    assert list(result["catalog_size"]) == [20, 50]
+    assert (result["seconds_per_query"] > 0).all()
+    assert (result["queries_per_second"] > 0).all()
 
 
-def test_cluster_recommendation_impact_losses_are_never_negative():
-    result = evaluate_cluster_recommendation_impact(
-        _spread_out_catalog(),
-        cluster_counts=(3, 5),
-        number_of_queries=40,
-        random_state=1,
-    )
-    assert set(result["clusters"]) == {3, 5}
-    assert (result["mean_delta_e_loss"] >= 0).all()
-    assert (result["max_delta_e_loss"] >= result["mean_delta_e_loss"]).all()
-    assert (result["top1_mismatch_rate"] >= 0).all()
-    assert (result["perceptible_loss_rate"] >= 0).all()
-
-
-def test_cluster_recommendation_impact_rejects_invalid_query_count():
+def test_benchmark_brute_force_search_rejects_invalid_query_count():
     with pytest.raises(ValueError, match="number_of_queries"):
-        evaluate_cluster_recommendation_impact(
-            _spread_out_catalog(), cluster_counts=(2,), number_of_queries=0
+        benchmark_brute_force_search(
+            _spread_out_catalog(), catalog_sizes=(20,), number_of_queries=0
         )

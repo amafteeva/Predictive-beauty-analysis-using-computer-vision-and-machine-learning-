@@ -224,115 +224,27 @@ def plot_match_swatches(
     return figure, axes
 
 
-def plot_cluster_metrics(cluster_evaluation: pd.DataFrame):
-    """Plot both K-Means selection metrics without background grids."""
+def plot_brute_force_latency(latency: pd.DataFrame):
+    """Plot brute-force CIEDE2000 search latency against catalogue size.
 
-    figure, axes = plt.subplots(1, 2, figsize=(12, 4))
-    axes[0].plot(
-        cluster_evaluation["clusters"],
-        cluster_evaluation["silhouette_score"],
-        marker="o",
-        color="#1F77B4",
-    )
-    axes[0].set(title="K-Means Silhouette Score", xlabel="Clusters", ylabel="Score")
-    axes[1].plot(
-        cluster_evaluation["clusters"],
-        cluster_evaluation["davies_bouldin_score"],
-        marker="o",
-        color="orange",
-    )
-    axes[1].set(
-        title="K-Means Davies-Bouldin Score",
-        xlabel="Clusters",
-        ylabel="Score",
-    )
-    for axis in axes:
-        axis.grid(False)
-    figure.tight_layout()
-    return figure, axes
-
-
-def plot_cluster_recommendation_impact(impact_evaluation: pd.DataFrame):
-    """Plot the downstream recommendation cost of cluster-restricted ranking.
-
-    Unlike plot_cluster_metrics (cluster geometry only), this shows how often
-    and how much restricting to a predicted cluster changes or worsens the
-    top-1 match a user would actually see, from
-    evaluate_cluster_recommendation_impact.
+    Takes the output of recommender.benchmark_brute_force_search and shows
+    whether a full scan over every product stays fast as the catalogue grows,
+    which is what justifies skipping any candidate-restriction step.
     """
 
-    figure, axes = plt.subplots(1, 2, figsize=(12, 4))
-    axes[0].plot(
-        impact_evaluation["clusters"],
-        impact_evaluation["mean_delta_e_loss"],
-        marker="o",
-        color="#D62728",
-        label="Mean Delta E loss",
-    )
-    axes[0].plot(
-        impact_evaluation["clusters"],
-        impact_evaluation["max_delta_e_loss"],
-        marker="o",
-        linestyle="--",
-        color="#D62728",
-        alpha=0.4,
-        label="Max Delta E loss",
-    )
-    axes[0].set(
-        title="Cluster-Restriction Colour Cost",
-        xlabel="Clusters",
-        ylabel="Delta E lost vs. unrestricted top-1",
-    )
-    axes[0].legend(fontsize=8)
-    axes[1].plot(
-        impact_evaluation["clusters"],
-        impact_evaluation["top1_mismatch_rate"] * 100,
+    figure, axis = plt.subplots(figsize=(8, 5))
+    axis.plot(
+        latency["catalog_size"],
+        latency["seconds_per_query"] * 1000,
         marker="o",
         color="#1F77B4",
-        label="Top-1 changed",
-    )
-    axes[1].plot(
-        impact_evaluation["clusters"],
-        impact_evaluation["perceptible_loss_rate"] * 100,
-        marker="o",
-        color="orange",
-        label="Perceptibly worse",
-    )
-    axes[1].set(
-        title="Cluster-Restriction Impact Rate",
-        xlabel="Clusters",
-        ylabel="% of simulated queries",
-    )
-    axes[1].legend(fontsize=8)
-    for axis in axes:
-        axis.grid(False)
-    figure.tight_layout()
-    return figure, axes
-
-
-def plot_shade_clusters(products: pd.DataFrame):
-    """Visualize learned shade groups in the LAB a/b plane."""
-
-    if "shade_cluster" not in products:
-        raise ValueError("products must include a 'shade_cluster' column.")
-    figure, axis = plt.subplots(figsize=(10, 6))
-    scatter = axis.scatter(
-        products["lab_a"],
-        products["lab_b"],
-        c=products["shade_cluster"],
-        cmap="tab10",
-        s=35,
-        alpha=0.8,
-        edgecolors="black",
-        linewidths=0.2,
     )
     axis.set(
-        title="Foundation Shade Clusters Learned by K-Means",
-        xlabel="LAB a: Green to Red",
-        ylabel="LAB b: Blue to Yellow",
+        title="Brute-Force CIEDE2000 Search Latency",
+        xlabel="Catalogue size (products)",
+        ylabel="Milliseconds per query",
     )
     axis.grid(False)
-    figure.colorbar(scatter, ax=axis, label="Shade cluster")
     figure.tight_layout()
     return figure, axis
 
