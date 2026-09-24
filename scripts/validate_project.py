@@ -61,7 +61,7 @@ def validate_required_files() -> list[str]:
         "src/foundation_matcher/__init__.py",
         "notebooks/01_foundation_matcher_demo.ipynb",
         "notebooks/02_fairface_pipeline_evaluation.ipynb",
-        "notebooks/03_shade_clustering.ipynb",
+        "notebooks/03_brute_force_matching.ipynb",
         "experiments/04_review_satisfaction_baseline.ipynb",
     ]
     return [f"Missing required file: {path}" for path in required if not (ROOT / path).is_file()]

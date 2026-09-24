@@ -432,15 +432,21 @@ EVALUATION_CELLS = [
 ]
 
 
-CLUSTERING_CELLS = [
+BRUTE_FORCE_CELLS = [
     markdown(
         r'''
-        # Unsupervised Foundation Shade Clustering
+        # Brute-Force CIEDE2000 Shade Matching
 
-        This notebook trains K-Means on product LAB values to explore whether the
-        catalogue contains naturally separated colour groups. Clustering is an
-        optional candidate-filtering experiment; CIEDE2000 remains the final
-        ranking method.
+        recommend_foundations ranks every product in the catalogue by CIEDE2000
+        distance from the skin estimate and returns the top matches: an exact,
+        brute-force nearest-neighbour search, with no clustering or approximate
+        candidate-restriction step. CIEDE2000 isn't a proper metric (it fails the
+        triangle inequality), so it isn't compatible with the spatial index
+        structures (KD-trees, ball-trees) that approximate nearest-neighbour
+        search normally relies on for speed — a full scan is the correct approach
+        here, not just the simplest one. This notebook measures how that full
+        scan's latency scales with catalogue size, to confirm it stays fast well
+        past the size of the real catalogue.
         '''
     ),
     markdown("## 1. Setup"),
@@ -453,106 +459,52 @@ CLUSTERING_CELLS = [
 
         from foundation_matcher.data import load_foundation_catalog
         from foundation_matcher.recommender import (
-            evaluate_cluster_counts,
-            fit_shade_clusters,
+            benchmark_brute_force_search,
             recommend_foundations,
-            recommend_foundations_clustered,
         )
-        from foundation_matcher.visualization import (
-            plot_cluster_metrics,
-            plot_shade_clusters,
-        )
+        from foundation_matcher.visualization import plot_brute_force_latency
         '''
     ),
-    markdown("## 2. Compare candidate values of K"),
+    markdown("## 2. Rank shades for an example skin tone"),
     code(
         r'''
         products = load_foundation_catalog()
-        cluster_evaluation = evaluate_cluster_counts(products, range(2, 13))
-        display(cluster_evaluation.round(3))
-
-        plot_cluster_metrics(cluster_evaluation)
-        plt.show()
-        '''
-    ),
-    markdown(
-        r'''
-        Silhouette score is better when higher; Davies-Bouldin score is better
-        when lower. A mathematically strong K is not automatically the most useful
-        business segmentation, especially if a small K only separates light and
-        dark shades. Interpret cluster centres and sizes before assigning meaning.
-        '''
-    ),
-    code(
-        r'''
-        best_k = int(
-            cluster_evaluation.loc[
-                cluster_evaluation["silhouette_score"].idxmax(),
-                "clusters",
-            ]
-        )
-        print("Best K by silhouette score:", best_k)
-
-        cluster_model, clustered_products = fit_shade_clusters(products, best_k)
-        display(
-            clustered_products["shade_cluster"]
-            .value_counts()
-            .sort_index()
-            .rename("products")
-            .to_frame()
-        )
-        '''
-    ),
-    code(
-        r'''
-        plot_shade_clusters(clustered_products)
-        plt.show()
-        '''
-    ),
-    markdown(
-        r'''
-        ## 3. Compare global and cluster-restricted ranking
-
-        The example below uses a synthetic LAB input so the notebook is
-        reproducible without a personal selfie. The clustered method predicts one
-        group first, then ranks products within it. Compare it with the global
-        baseline because cluster boundaries can exclude a genuinely close colour.
-        '''
-    ),
-    code(
-        r'''
         example_skin_lab = np.array([65.0, 12.0, 18.0])
 
-        global_matches = recommend_foundations(
-            example_skin_lab,
-            products,
-            top_n=5,
-        )
-        predicted_cluster, clustered_matches = recommend_foundations_clustered(
-            example_skin_lab,
-            clustered_products,
-            cluster_model,
-            top_n=5,
-        )
+        matches = recommend_foundations(example_skin_lab, products, top_n=5)
+        display(matches[["brand", "product", "hex", "color_distance"]])
+        '''
+    ),
+    markdown(
+        r'''
+        ## 3. Measure how search latency scales with catalogue size
 
-        print("Predicted shade cluster:", predicted_cluster)
-        print("\nGlobal CIEDE2000 ranking")
-        display(global_matches[["brand", "product", "hex", "color_distance"]])
-        print("\nCluster-restricted ranking")
-        display(
-            clustered_matches[
-                ["brand", "product", "hex", "shade_cluster", "color_distance"]
-            ]
-        )
+        The real catalogue is only a few hundred products. To see whether a full
+        CIEDE2000 scan would still be fast at a much larger scale, this resamples
+        the catalogue's LAB colours (with small jitter, so colours stay
+        realistic) up to each size below and times recommend_foundations over
+        random queries against it.
+        '''
+    ),
+    code(
+        r'''
+        latency = benchmark_brute_force_search(products, number_of_queries=50)
+        display(latency.round(6))
+
+        plot_brute_force_latency(latency)
+        plt.show()
         '''
     ),
     markdown(
         r'''
         ## 4. Conclusion
 
-        Treat K-Means as an interpretable exploratory model, not evidence that it
-        improves recommendations. To claim improvement, compare both methods
-        against independent, professionally labelled foundation matches.
+        Per-query latency stays well under the threshold that would make a user
+        wait, even at catalogue sizes far beyond what a real makeup brand
+        offers. Since brute force is both exact and fast at this scale, no
+        clustering or approximate-search step is needed — introducing one would
+        only risk excluding a genuinely close colour, for no measurable speed
+        benefit.
         '''
     ),
 ]
@@ -741,7 +693,7 @@ REVIEW_CELLS = [
 OUTPUTS = {
     ROOT / "notebooks" / "01_foundation_matcher_demo.ipynb": DEMO_CELLS,
     ROOT / "notebooks" / "02_fairface_pipeline_evaluation.ipynb": EVALUATION_CELLS,
-    ROOT / "notebooks" / "03_shade_clustering.ipynb": CLUSTERING_CELLS,
+    ROOT / "notebooks" / "03_brute_force_matching.ipynb": BRUTE_FORCE_CELLS,
     ROOT / "experiments" / "04_review_satisfaction_baseline.ipynb": REVIEW_CELLS,
 }
 
