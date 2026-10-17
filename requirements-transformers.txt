@@ -1,0 +1,8 @@
+# Optional: only needed for the DistilBERT fine-tuning experiment
+# (foundation_matcher.review_transformer). Install with:
+#   pip install -r requirements.txt -r requirements-transformers.txt
+# The shade-matching pipeline and the TF-IDF/logistic-regression review
+# baseline never import torch or transformers.
+-r requirements.txt
+torch>=2.2
+transformers>=4.40

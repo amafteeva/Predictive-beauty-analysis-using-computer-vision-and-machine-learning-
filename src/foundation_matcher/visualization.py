@@ -289,6 +289,69 @@ def plot_group_completion(group_summary: pd.DataFrame):
     return figure, axis
 
 
+def plot_model_comparison(
+    comparison: pd.DataFrame,
+    *,
+    model_column: str = "model",
+    metric_columns: tuple[str, ...] = ("accuracy", "macro_f1"),
+):
+    """Bar chart comparing quality metrics across the review-classifier comparison.
+
+    Expects one row per model (dummy baseline, TF-IDF+logistic-regression,
+    DistilBERT) with a `model_column` name and one column per metric, as
+    produced by `scripts/run_review_experiment.py`.
+    """
+
+    figure, axis = plt.subplots(figsize=(8, 5))
+    positions = np.arange(len(comparison))
+    width = 0.8 / len(metric_columns)
+    colours = ["#1F77B4", "#FF7F0E", "#2CA02C", "#D62728"]
+    for index, metric in enumerate(metric_columns):
+        axis.bar(
+            positions + index * width,
+            comparison[metric],
+            width,
+            label=metric,
+            color=colours[index % len(colours)],
+        )
+    axis.set_xticks(positions + width * (len(metric_columns) - 1) / 2)
+    axis.set_xticklabels(comparison[model_column], rotation=15, ha="right")
+    axis.set(title="Review Classifier Quality Comparison", ylabel="Score")
+    axis.legend()
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
+def plot_latency_comparison(comparison: pd.DataFrame, *, model_column: str = "model"):
+    """Bar chart comparing p50/p95 prediction latency (ms) across models."""
+
+    figure, axis = plt.subplots(figsize=(8, 5))
+    positions = np.arange(len(comparison))
+    width = 0.35
+    axis.bar(
+        positions - width / 2,
+        comparison["p50_ms"],
+        width,
+        label="p50",
+        color="#1F77B4",
+    )
+    axis.bar(
+        positions + width / 2,
+        comparison["p95_ms"],
+        width,
+        label="p95",
+        color="#FF7F0E",
+    )
+    axis.set_xticks(positions)
+    axis.set_xticklabels(comparison[model_column], rotation=15, ha="right")
+    axis.set(title="Prediction Latency by Model", ylabel="Milliseconds")
+    axis.legend()
+    axis.grid(False)
+    figure.tight_layout()
+    return figure, axis
+
+
 def plot_previews(previews: list[dict], columns: int = 7):
     """Display marked facial sampling regions from successful evaluations."""
 
@@ -297,7 +360,8 @@ def plot_previews(previews: list[dict], columns: int = 7):
     axes = np.atleast_1d(axes).flatten()
     for axis in axes:
         axis.axis("off")
-    for axis, preview in zip(axes, previews):
+    # More axes than previews is expected (the grid is padded), so not strict.
+    for axis, preview in zip(axes, previews, strict=False):
         axis.imshow(preview["image"])
         axis.set_title(preview["group"], fontsize=9)
         axis.axis("off")
