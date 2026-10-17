@@ -47,7 +47,7 @@ import os
 import subprocess
 import sys
 
-REPOSITORY_URL = "https://github.com/YOUR_USERNAME/foundation-shade-recommender.git"
+REPOSITORY_URL = "https://github.com/amafteeva/Predictive-beauty-analysis-using-computer-vision-and-machine-learning-.git"
 
 
 def find_project_root(start: Path) -> Path | None:
