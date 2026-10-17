@@ -166,3 +166,28 @@ def test_apply_manual_prices_prefers_product_level_over_brand_level():
 
     assert result.loc[result["product"] == "P2", "price"].iloc[0] == 12.0
     assert result.loc[result["product"] == "P3", "price"].iloc[0] == 30.0
+
+
+def test_clean_brand_placeholders_and_price_reference():
+    import pandas as pd
+
+    from foundation_matcher.data import (
+        attach_price_estimates,
+        clean_brand_placeholders,
+    )
+
+    brands = pd.Series(["Ask A Question", " find your shade ", "MAC", None])
+    assert clean_brand_placeholders(brands).isna().tolist() == [True, True, False, True]
+    catalogue = pd.DataFrame(
+        {"brand": ["MAC", "Ask A Question"], "product": ["x", "y"]}
+    )
+    reference = pd.DataFrame(
+        {
+            "brand": ["MAC", "Ask A Question"],
+            "price": [30.0, 99.0],
+            "category": ["Foundation", "Foundation"],
+        }
+    )
+    priced = attach_price_estimates(catalogue, reference)
+    assert priced["price"].iloc[0] == 30.0
+    assert pd.isna(priced["price"].iloc[1])  # a placeholder is never a price source

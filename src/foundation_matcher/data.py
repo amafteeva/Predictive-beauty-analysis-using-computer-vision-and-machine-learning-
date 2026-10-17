@@ -13,6 +13,21 @@ from foundation_matcher.config import FOUNDATION_DATA_URL
 
 REQUIRED_FOUNDATION_COLUMNS = {"brand", "product", "hex"}
 
+# Values scraped into the Luxxify product export's `brand` column that are
+# retailer page-button labels, not brands ("Ask A Question" is the single most
+# common "brand" in the export: 226 of 1,373 products; "Find your shade": 59).
+PLACEHOLDER_BRANDS = frozenset({"ask a question", "find your shade"})
+
+
+def clean_brand_placeholders(brands: pd.Series) -> pd.Series:
+    """Replace scraped placeholder brand labels with missing values."""
+
+    is_placeholder = brands.map(
+        lambda value: isinstance(value, str)
+        and value.strip().lower() in PLACEHOLDER_BRANDS
+    )
+    return brands.mask(is_placeholder)
+
 
 def validate_columns(data: pd.DataFrame, required: set[str]) -> None:
     """Raise a helpful error when required columns are missing."""
@@ -95,9 +110,13 @@ def attach_price_estimates(
         normalized_brand = reference_subset[reference_brand_column].map(normalize_brand_name)
         return reference_subset[reference_price_column].groupby(normalized_brand).median()
 
-    reference = price_reference.dropna(
-        subset=[reference_brand_column, reference_price_column]
-    )
+    reference = price_reference.assign(
+        **{
+            reference_brand_column: clean_brand_placeholders(
+                price_reference[reference_brand_column]
+            )
+        }
+    ).dropna(subset=[reference_brand_column, reference_price_column])
 
     use_category = (
         reference_category_column is not None
@@ -165,7 +184,7 @@ def apply_manual_prices(
 
     if product_prices:
         clean = {key: value for key, value in product_prices.items() if value is not None}
-        keys = list(zip(result["brand"], result["product"]))
+        keys = list(zip(result["brand"], result["product"], strict=True))
         fill_from(pd.Series([clean.get(key) for key in keys], index=result.index))
 
     if brand_prices:
