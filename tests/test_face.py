@@ -2,6 +2,10 @@ import cv2
 import numpy as np
 import pytest
 
+from foundation_matcher.config import (
+    LEFT_EYE_CONTOUR_IDS,
+    LEFT_IRIS_IDS,
+)
 from foundation_matcher.face import _reject_color_outliers, extract_skin_tone
 
 IMAGE_SIZE = 200
@@ -38,15 +42,31 @@ class FakeLandmarker:
 
 
 def _make_face_landmarks(cheek_left_xy, cheek_right_xy, forehead_xy):
-    # Index 117/346/151 match SKIN_LANDMARK_IDS; the rest are filler points
-    # spanning the full image so face-width detection stays deterministic.
-    landmarks = [FakeLandmark(0.5, 0.5) for _ in range(350)]
+    # Index 117/346/151 match SKIN_LANDMARK_IDS; 478 points covers the full
+    # mesh including the iris landmarks (indices up to 477). The filler
+    # points all collapse onto one spot, which degenerates eye-contour
+    # detection to an empty region -- exercising the "no reliable sclera
+    # reading" fallback path unless a test overrides the eye landmarks.
+    landmarks = [FakeLandmark(0.5, 0.5) for _ in range(478)]
     landmarks[0] = FakeLandmark(0.0, 0.5)
     landmarks[1] = FakeLandmark(1.0, 0.5)
     landmarks[117] = FakeLandmark(*cheek_left_xy)
     landmarks[346] = FakeLandmark(*cheek_right_xy)
     landmarks[151] = FakeLandmark(*forehead_xy)
     return landmarks
+
+
+def _place_synthetic_eye(landmarks, centre_xy, contour_radius, contour_ids, iris_ids):
+    """Arrange fake landmarks around a circle, for white-balance tests."""
+
+    for index, landmark_id in enumerate(contour_ids):
+        angle = 2 * np.pi * index / len(contour_ids)
+        landmarks[landmark_id] = FakeLandmark(
+            centre_xy[0] + contour_radius * np.cos(angle),
+            centre_xy[1] + contour_radius * np.sin(angle),
+        )
+    for landmark_id in iris_ids:
+        landmarks[landmark_id] = FakeLandmark(*centre_xy)
 
 
 def _uniform_image(color=SKIN_RGB):
@@ -85,10 +105,62 @@ def test_extract_skin_tone_matches_uniform_skin_colour(tmp_path):
     skin_tone = extract_skin_tone(image_path, landmarker)
 
     assert np.allclose(skin_tone.rgb, SKIN_RGB, atol=2)
+    # No usable sclera region (all eye landmarks collapse to one point), so
+    # white-balance correction should have backed off to a no-op.
+    assert np.allclose(skin_tone.white_balance_gains, 1.0)
     # Detection ran against the same decoded array used for sampling, not a
     # second, potentially differently-oriented decode of the file.
     assert landmarker.received_image.width == IMAGE_SIZE
     assert landmarker.received_image.height == IMAGE_SIZE
+
+
+# A mild, uniform colour cast (mean channel ratio 1.0) applied to both the
+# skin and the "sclera" patch below, as one real light source would.
+_COLOUR_CAST = np.array([1.08, 1.0, 0.92])
+
+
+def _tint(rgb, cast=_COLOUR_CAST):
+    tinted = np.clip(np.array(rgb, dtype=float) * cast, 0, 255).astype(np.uint8)
+    return tuple(tinted.tolist())
+
+
+def _make_colour_cast_image(tmp_path):
+    image = _uniform_image(_tint(SKIN_RGB))
+    eye_centre_px = (50, 100)
+    cv2.circle(image, eye_centre_px, 20, _tint((200, 200, 200)), -1)
+    image_path = tmp_path / "colour_cast.jpg"
+    _save_bgr(image_path, image)
+
+    landmarks = _make_face_landmarks((0.3, 0.6), (0.7, 0.6), (0.5, 0.2))
+    eye_centre_xy = (eye_centre_px[0] / IMAGE_SIZE, eye_centre_px[1] / IMAGE_SIZE)
+    _place_synthetic_eye(
+        landmarks,
+        eye_centre_xy,
+        contour_radius=12 / IMAGE_SIZE,
+        contour_ids=LEFT_EYE_CONTOUR_IDS,
+        iris_ids=LEFT_IRIS_IDS,
+    )
+    return image_path, landmarks
+
+
+def test_extract_skin_tone_corrects_a_colour_cast_using_the_sclera(tmp_path):
+    image_path, landmarks = _make_colour_cast_image(tmp_path)
+    landmarker = FakeLandmarker(FakeDetectionResult([landmarks]))
+
+    skin_tone = extract_skin_tone(image_path, landmarker)
+
+    assert np.allclose(skin_tone.white_balance_gains, 1.0 / _COLOUR_CAST, atol=0.05)
+    assert np.allclose(skin_tone.rgb, SKIN_RGB, atol=5)
+
+
+def test_extract_skin_tone_can_skip_white_balance_correction(tmp_path):
+    image_path, landmarks = _make_colour_cast_image(tmp_path)
+    landmarker = FakeLandmarker(FakeDetectionResult([landmarks]))
+
+    skin_tone = extract_skin_tone(image_path, landmarker, correct_white_balance=False)
+
+    assert np.allclose(skin_tone.white_balance_gains, 1.0)
+    assert np.allclose(skin_tone.rgb, _tint(SKIN_RGB), atol=2)
 
 
 def test_extract_skin_tone_ignores_an_occluded_region(tmp_path):

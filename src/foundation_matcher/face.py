@@ -12,7 +12,14 @@ import numpy as np
 from skimage.color import deltaE_ciede2000
 
 from foundation_matcher.color import rgb_to_lab
-from foundation_matcher.config import FACE_LANDMARKER_URL, SKIN_LANDMARK_IDS
+from foundation_matcher.config import (
+    FACE_LANDMARKER_URL,
+    LEFT_EYE_CONTOUR_IDS,
+    LEFT_IRIS_IDS,
+    RIGHT_EYE_CONTOUR_IDS,
+    RIGHT_IRIS_IDS,
+    SKIN_LANDMARK_IDS,
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +30,7 @@ class SkinTone:
     lab: np.ndarray
     preview_rgb: np.ndarray
     face_count: int
+    white_balance_gains: np.ndarray
 
 
 def download_face_landmarker(
@@ -100,6 +108,90 @@ def _reject_color_outliers(pixels: np.ndarray, *, threshold: float = 3.5) -> np.
     return pixels[modified_z_scores <= threshold]
 
 
+def _eye_region_pixels(
+    photo_rgb: np.ndarray,
+    landmarks,
+    width: int,
+    height: int,
+    contour_ids: tuple[int, ...],
+    iris_ids: tuple[int, ...],
+) -> np.ndarray:
+    """Return pixels inside an eye's contour, excluding the iris and pupil."""
+
+    contour_points = np.array(
+        [(landmarks[i].x * width, landmarks[i].y * height) for i in contour_ids],
+        dtype=np.int32,
+    )
+    eye_mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(eye_mask, cv2.convexHull(contour_points), 255)
+
+    iris_points = np.array(
+        [(landmarks[i].x * width, landmarks[i].y * height) for i in iris_ids]
+    )
+    iris_centre = iris_points.mean(axis=0)
+    iris_radius = np.linalg.norm(iris_points - iris_centre, axis=1).max()
+    # Pad past the iris boundary so its edge and the pupil don't leak into
+    # the sclera sample.
+    cv2.circle(eye_mask, tuple(iris_centre.astype(int)), int(iris_radius * 1.3), 0, -1)
+
+    return photo_rgb[eye_mask == 255]
+
+
+def _estimate_white_balance_gains(
+    photo_rgb: np.ndarray,
+    landmarks,
+    width: int,
+    height: int,
+    *,
+    min_candidate_pixels: int = 30,
+    max_gain: float = 1.8,
+) -> np.ndarray:
+    """Estimate per-channel correction gains from the sclera (eye white).
+
+    The sclera is a near-white reference visible in nearly every face photo,
+    so its measured colour under the shot's actual lighting reveals that
+    lighting's colour cast (warm indoor bulbs, cool daylight, mixed
+    sources). Scaling it back to neutral gray corrects the whole photo's
+    white balance. This is more reliable than a plain gray-world assumption
+    (averaging the whole frame to gray), which breaks on close-up selfies
+    where skin -- not a neutral tone -- fills most of the image.
+
+    This corrects a colour *cast* (an unusual light source). It cannot
+    restore colour that a filter or edit has deliberately desaturated out
+    of the skin itself -- there, the sclera will show a normal, mild cast
+    while the skin sits at implausibly low saturation for its lightness;
+    that failure mode needs a human to notice and pick a different photo,
+    not an automatic correction.
+    """
+
+    region_pixels = [
+        _eye_region_pixels(photo_rgb, landmarks, width, height, contour_ids, iris_ids)
+        for contour_ids, iris_ids in (
+            (LEFT_EYE_CONTOUR_IDS, LEFT_IRIS_IDS),
+            (RIGHT_EYE_CONTOUR_IDS, RIGHT_IRIS_IDS),
+        )
+    ]
+    region_pixels = [pixels for pixels in region_pixels if len(pixels) > 0]
+    if not region_pixels:
+        return np.ones(3)
+    pixels = np.vstack(region_pixels)
+
+    # Keep only bright, low-saturation pixels (true sclera, not eyelid skin,
+    # eyelashes, or blood vessels) that aren't clipped to pure white
+    # (a blown-out highlight carries no colour-cast information).
+    hsv = cv2.cvtColor(pixels.reshape(1, -1, 3).astype(np.uint8), cv2.COLOR_RGB2HSV)[0]
+    saturation, value = hsv[:, 1], hsv[:, 2]
+    not_clipped = pixels.max(axis=1) < 250
+    white_candidates = pixels[(saturation < 40) & (value > 120) & not_clipped]
+
+    if len(white_candidates) < min_candidate_pixels:
+        return np.ones(3)
+
+    white_point = np.clip(np.median(white_candidates, axis=0).astype(float), 1.0, None)
+    gains = white_point.mean() / white_point
+    return np.clip(gains, 1.0 / max_gain, max_gain)
+
+
 def extract_skin_tone(
     image_path: str | Path,
     landmarker,
@@ -109,8 +201,17 @@ def extract_skin_tone(
     trim_percent: float = 5.0,
     outlier_threshold: float = 3.5,
     region_consistency_delta_e: float = 20.0,
+    correct_white_balance: bool = True,
 ) -> SkinTone:
-    """Estimate skin colour from both cheeks and the centre forehead."""
+    """Estimate skin colour from both cheeks and the centre forehead.
+
+    When ``correct_white_balance`` is true (the default), the photo's
+    colour cast is corrected against its own sclera before skin pixels are
+    sampled, so the estimate is less sensitive to the light the photo was
+    taken under. If no reliable sclera reading is available (eyes closed,
+    extreme angle), correction is skipped and the raw photo colours are
+    used, matching the previous behaviour.
+    """
 
     image_path = Path(image_path)
     photo_bgr = cv2.imread(str(image_path))
@@ -132,6 +233,17 @@ def extract_skin_tone(
 
     face_count = len(detection.face_landmarks)
     landmarks = detection.face_landmarks[0]
+
+    if correct_white_balance:
+        white_balance_gains = _estimate_white_balance_gains(
+            photo_rgb, landmarks, width, height
+        )
+        photo_rgb = np.clip(
+            photo_rgb.astype(float) * white_balance_gains, 0, 255
+        ).astype(np.uint8)
+    else:
+        white_balance_gains = np.ones(3)
+
     landmark_x = np.array([point.x * width for point in landmarks])
     face_width = landmark_x.max() - landmark_x.min()
     radius = max(6, int(face_width * radius_ratio))
@@ -196,4 +308,5 @@ def extract_skin_tone(
         lab=rgb_to_lab(skin_rgb),
         preview_rgb=preview_rgb,
         face_count=face_count,
+        white_balance_gains=white_balance_gains,
     )
